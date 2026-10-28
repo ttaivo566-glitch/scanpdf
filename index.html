@@ -37,7 +37,8 @@ main{max-width:1100px;margin:auto;padding:12px 16px 40px;display:grid;gap:16px;g
 .card{position:relative;border:2px solid var(--line);border-radius:8px;background:#fff;overflow:hidden;cursor:pointer}
 .card.cur{border-color:var(--seal)}
 .card.off canvas{opacity:.3}
-.card.drag{opacity:.7;box-shadow:0 4px 14px rgba(20,33,61,.4)}
+.card{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+.card.drag{z-index:5;will-change:transform;box-shadow:0 10px 24px rgba(20,33,61,.35)}
 .card canvas{display:block;width:100%;height:132px;object-fit:contain;background:#f1f3f5}
 .ck{position:absolute;top:4px;left:4px;background:#fff;border-radius:5px;padding:3px;line-height:0}
 .ck input{width:20px;height:20px;margin:0;accent-color:var(--seal)}
@@ -97,6 +98,8 @@ label.chk input{width:18px;height:18px;margin:0;accent-color:var(--seal)}
       <div class="ph">
         <b id="cnt"></b>
         <div class="row">
+          <button class="btn sm main" id="pAdd">+ Chọn thêm ảnh</button>
+          <button class="btn sm main" id="pCam">+ Chụp thêm</button>
           <button class="btn sm" id="selAll">Chọn tất cả</button>
           <button class="btn sm" id="selNone">Bỏ chọn tất cả</button>
         </div>
@@ -128,7 +131,8 @@ label.chk input{width:18px;height:18px;margin:0;accent-color:var(--seal)}
       <button class="btn" id="rotR">Xoay phải</button>
     </div>
     <div class="row">
-      <button class="btn" id="add">Thêm ảnh</button>
+      <button class="btn" id="add">Chọn thêm ảnh</button>
+      <button class="btn" id="addCam">Chụp thêm</button>
       <button class="btn" id="del">Xóa trang này</button>
     </div>
     <button class="btn main" id="dlPdf">Tải PDF</button>
@@ -333,6 +337,50 @@ function renumber(){
   $('dlPdf').textContent=n?'Tải PDF ('+n+' trang)':'Tải PDF';
 }
 
+/* Kéo thả: thẻ bám theo ngón tay, các thẻ khác trượt êm sang chỗ mới */
+let D=null;
+window.addEventListener('touchmove',e=>{if(D)e.preventDefault()},{passive:false});
+function startDrag(e,card,grip){
+  e.preventDefault();
+  const r=card.getBoundingClientRect();
+  D={card,x:e.clientX,y:e.clientY,gx:e.clientX-r.left,gy:e.clientY-r.top};
+  grip.setPointerCapture(e.pointerId);
+  card.style.transition='none';card.classList.add('drag');
+  if(navigator.vibrate)navigator.vibrate(8);
+  requestAnimationFrame(dragTick);
+}
+function dragTick(){
+  if(!D)return;
+  const card=D.card;
+  if(D.y<70)window.scrollBy(0,-14);else if(D.y>innerHeight-70)window.scrollBy(0,14);
+  const hit=document.elementsFromPoint(D.x,D.y).map(el=>el.closest&&el.closest('.card')).find(c=>c&&c!==card&&c.parentNode===list);
+  if(hit){
+    const others=[...list.children].filter(c=>c!==card),before=new Map(others.map(c=>[c,c.getBoundingClientRect()]));
+    if(card.compareDocumentPosition(hit)&Node.DOCUMENT_POSITION_FOLLOWING)list.insertBefore(card,hit.nextSibling);
+    else list.insertBefore(card,hit);
+    others.forEach(c=>{
+      const a=before.get(c),b=c.getBoundingClientRect(),dx=a.left-b.left,dy=a.top-b.top;
+      if(dx||dy){
+        c.style.transition='none';c.style.transform='translate('+dx+'px,'+dy+'px)';
+        c.getBoundingClientRect();
+        c.style.transition='transform .18s ease';c.style.transform='';
+      }
+    });
+  }
+  card.style.transform='none';
+  const r=card.getBoundingClientRect();
+  card.style.transform='translate('+(D.x-D.gx-r.left)+'px,'+(D.y-D.gy-r.top)+'px) scale(1.06)';
+  requestAnimationFrame(dragTick);
+}
+function endDrag(){
+  if(!D)return;
+  const card=D.card;D=null;
+  card.style.transition='transform .16s ease';card.style.transform='';
+  setTimeout(()=>{card.classList.remove('drag');card.style.transition=''},170);
+  const by=Object.fromEntries(S.pages.map(q=>[q.id,q]));
+  S.pages=[...list.children].map(c=>by[c.dataset.id]);renumber();
+}
+
 function rebuild(){
   const has=S.pages.length>0;
   $('drop').style.display=has?'none':'flex';
@@ -351,23 +399,11 @@ function rebuild(){
     const num=document.createElement('span');num.className='num';
     bar.append(grip,num);card.append(ck,p.tc,bar);
     card.onclick=()=>{S.cur=p;[...list.children].forEach(c=>c.classList.toggle('cur',c===card));draw()};
-    let dragging=false;
     grip.onclick=e=>e.stopPropagation();
-    grip.onpointerdown=e=>{e.preventDefault();dragging=true;grip.setPointerCapture(e.pointerId);card.classList.add('drag')};
-    grip.onpointermove=e=>{
-      if(!dragging)return;
-      const t=document.elementFromPoint(e.clientX,e.clientY),o=t&&t.closest('.card');
-      if(o&&o!==card&&o.parentNode===list){
-        if(card.compareDocumentPosition(o)&Node.DOCUMENT_POSITION_FOLLOWING)list.insertBefore(card,o.nextSibling);
-        else list.insertBefore(card,o);
-      }
-    };
-    const end=()=>{
-      if(!dragging)return;dragging=false;card.classList.remove('drag');
-      const by=Object.fromEntries(S.pages.map(q=>[q.id,q]));
-      S.pages=[...list.children].map(c=>by[c.dataset.id]);renumber();
-    };
-    grip.onpointerup=end;grip.onpointercancel=end;
+    grip.oncontextmenu=e=>e.preventDefault();
+    grip.onpointerdown=e=>startDrag(e,card,grip);
+    grip.onpointermove=e=>{if(D&&D.card===card){D.x=e.clientX;D.y=e.clientY}};
+    grip.onpointerup=endDrag;grip.onpointercancel=endDrag;
     list.appendChild(card);
   });
   renumber();
@@ -389,8 +425,8 @@ document.querySelectorAll('#vmode button').forEach(b=>b.onclick=()=>{
   S.view=b.dataset.v;document.querySelectorAll('#vmode button').forEach(x=>x.classList.toggle('on',x===b));draw();
 });
 ['wp','bp','thr'].forEach(id=>$(id).addEventListener('input',()=>{sync();draw()}));
-$('pick').onclick=$('add').onclick=()=>$('f').click();
-$('cam').onclick=()=>$('fc').click();
+['pick','add','pAdd'].forEach(id=>$(id).onclick=()=>$('f').click());
+['cam','addCam','pCam'].forEach(id=>$(id).onclick=()=>$('fc').click());
 $('f').onchange=e=>{load(e.target.files);e.target.value=''};
 $('fc').onchange=e=>{load(e.target.files);e.target.value=''};
 $('rotL').onclick=()=>{if(S.cur){S.cur.rot=(S.cur.rot+270)%360;draw()}};
