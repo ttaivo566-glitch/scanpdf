@@ -65,6 +65,31 @@ dialog input[type=text]{width:100%;padding:10px;font:inherit;border:1px solid va
 label.chk{display:flex;gap:8px;align-items:center;color:var(--ink)}
 label.chk input{width:18px;height:18px;margin:0;accent-color:var(--seal)}
 #ec{display:block;margin:8px auto;max-width:100%;max-height:58vh;touch-action:none;border-radius:6px;background:#dfe4e8}
+
+#list{position:relative}
+#cdlg{width:min(96vw,720px)}
+.ecw{position:relative;width:fit-content;max-width:100%;margin:8px auto}
+.ecw #ec{margin:0}
+#lp{position:absolute;top:8px;left:8px;width:130px;height:130px;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 12px rgba(0,0,0,.55);pointer-events:none;display:none;background:#000}
+.d-only{display:none}
+body.desk .d-only{display:inline}
+body.desk .m-only{display:none}
+body.desk #cam,body.desk #addCam,body.desk #pCam{display:none}
+body.desk header,body.desk main{max-width:1560px}
+body.desk main{grid-template-columns:minmax(0,1fr) 320px;gap:20px;padding:12px 24px 48px}
+body.desk.has main{grid-template-columns:280px minmax(0,1fr) 320px}
+body.desk .left{display:contents}
+body.desk #stage{grid-column:1;grid-row:1;padding:16px}
+body.desk.has #stage{grid-column:2}
+body.desk aside{grid-column:2;grid-row:1}
+body.desk.has aside{grid-column:3}
+body.desk #pagesBox{grid-column:1;grid-row:1;position:sticky;top:12px;max-height:calc(100vh - 24px);overflow:auto}
+body.desk .view{max-height:calc(100vh - 150px)}
+body.desk .card{cursor:grab}
+body.desk .card canvas{height:150px}
+body.desk .drop{min-height:60vh}
+body.desk #cdlg{width:min(94vw,1000px)}
+body.desk #ec{max-height:74vh}
 </style>
 </head>
 <body>
@@ -105,7 +130,7 @@ label.chk input{width:18px;height:18px;margin:0;accent-color:var(--seal)}
         </div>
       </div>
       <div class="grid" id="list"></div>
-      <p class="hint" style="margin-top:10px">Chạm vào trang để xem. Tick để chọn trang đưa vào PDF. Giữ và kéo biểu tượng ⠿ để đổi thứ tự.</p>
+      <p class="hint" style="margin-top:10px">Chạm vào trang để xem. Tick để chọn trang đưa vào PDF. <span class="m-only">Giữ và kéo biểu tượng ⠿ để đổi thứ tự.</span><span class="d-only">Nhấn giữ chuột rồi kéo cả trang để đổi thứ tự.</span></p>
     </section>
   </div>
 
@@ -139,10 +164,10 @@ label.chk input{width:18px;height:18px;margin:0;accent-color:var(--seal)}
     <p class="hint">Mẹo: chụp thẳng góc, đủ sáng, không đổ bóng. Nếu chữ mờ, giảm "Ngưỡng" hoặc tăng "Độ đậm nét". Cài đặt áp dụng cho tất cả trang, riêng xoay thì theo từng trang.</p>
   </aside>
 </main>
-<dialog id="cdlg" style="width:min(96vw,720px)">
+<dialog id="cdlg">
   <h2>Chỉnh khung cắt</h2>
-  <p class="hint">Kéo 4 góc cho khớp mép giấy. Ảnh sẽ được nắn thẳng theo khung này.</p>
-  <canvas id="ec"></canvas>
+  <p class="hint">Chạm gần một góc rồi kéo. Kính lúp hiện ở phía trên để bạn nhìn rõ điểm đang chỉnh dù ngón tay che mất. Ảnh sẽ được nắn thẳng theo khung này.</p>
+  <div class="ecw"><canvas id="ec"></canvas><canvas id="lp" width="260" height="260"></canvas></div>
   <div class="row"><button class="btn" id="cAuto">Tự nhận diện</button><button class="btn" id="cFull">Cả ảnh</button></div>
   <div class="row" style="margin-top:8px"><button class="btn" id="cCancel">Hủy</button><button class="btn main" id="cOk">Áp dụng</button></div>
 </dialog>
@@ -337,52 +362,73 @@ function renumber(){
   $('dlPdf').textContent=n?'Tải PDF ('+n+' trang)':'Tải PDF';
 }
 
-/* Kéo thả: thẻ bám theo ngón tay, các thẻ khác trượt êm sang chỗ mới */
-let D=null;
-window.addEventListener('touchmove',e=>{if(D)e.preventDefault()},{passive:false});
-function startDrag(e,card,grip){
+/* Kéo thả sắp xếp: thẻ bám theo tay, các thẻ khác trượt êm; thứ tự chỉ ghi khi thả */
+let D=null,settle=false;
+window.addEventListener('touchmove',function(e){if(D)e.preventDefault()},{passive:false});
+function startDrag(e,card,el,ox,oy){
   e.preventDefault();
-  const r=card.getBoundingClientRect();
-  D={card,x:e.clientX,y:e.clientY,gx:e.clientX-r.left,gy:e.clientY-r.top};
-  grip.setPointerCapture(e.pointerId);
-  card.style.transition='none';card.classList.add('drag');
+  if(settle||D)return;
+  const kids=[...list.children],lr=list.getBoundingClientRect();
+  const slots=kids.map(c=>({x:c.offsetLeft,y:c.offsetTop,w:c.offsetWidth,h:c.offsetHeight}));
+  const from=kids.indexOf(card),sx=ox===undefined?e.clientX:ox,sy=oy===undefined?e.clientY:oy;
+  D={card,kids,slots,from,cur:from,arr:kids,x:e.clientX,y:e.clientY,gx:sx-lr.left-slots[from].x,gy:sy-lr.top-slots[from].y};
+  try{el.setPointerCapture(e.pointerId)}catch(_){}
+  kids.forEach(c=>{c.style.transition='none'});
+  card.classList.add('drag');
   if(navigator.vibrate)navigator.vibrate(8);
   requestAnimationFrame(dragTick);
 }
+function layoutOthers(){
+  const arr=D.kids.slice();arr.splice(D.from,1);arr.splice(D.cur,0,D.card);
+  arr.forEach((c,k)=>{
+    if(c===D.card)return;
+    const a=D.slots[D.kids.indexOf(c)],b=D.slots[k];
+    c.style.transition='transform .2s ease';
+    c.style.transform=a===b?'':'translate('+(b.x-a.x)+'px,'+(b.y-a.y)+'px)';
+  });
+  D.arr=arr;
+}
 function dragTick(){
   if(!D)return;
-  const card=D.card;
-  if(D.y<70)window.scrollBy(0,-14);else if(D.y>innerHeight-70)window.scrollBy(0,14);
-  const hit=document.elementsFromPoint(D.x,D.y).map(el=>el.closest&&el.closest('.card')).find(c=>c&&c!==card&&c.parentNode===list);
-  if(hit){
-    const others=[...list.children].filter(c=>c!==card),before=new Map(others.map(c=>[c,c.getBoundingClientRect()]));
-    if(card.compareDocumentPosition(hit)&Node.DOCUMENT_POSITION_FOLLOWING)list.insertBefore(card,hit.nextSibling);
-    else list.insertBefore(card,hit);
-    others.forEach(c=>{
-      const a=before.get(c),b=c.getBoundingClientRect(),dx=a.left-b.left,dy=a.top-b.top;
-      if(dx||dy){
-        c.style.transition='none';c.style.transform='translate('+dx+'px,'+dy+'px)';
-        c.getBoundingClientRect();
-        c.style.transition='transform .18s ease';c.style.transform='';
-      }
-    });
+  const card=D.card,lr=list.getBoundingClientRect(),box=$('pagesBox');
+  if(document.body.classList.contains('desk')&&box.scrollHeight>box.clientHeight){
+    const r=box.getBoundingClientRect();
+    if(D.y<r.top+50)box.scrollTop-=14;else if(D.y>r.bottom-50)box.scrollTop+=14;
+  }else{
+    if(D.y<70)window.scrollBy(0,-14);else if(D.y>innerHeight-70)window.scrollBy(0,14);
   }
-  card.style.transform='none';
-  const r=card.getBoundingClientRect();
-  card.style.transform='translate('+(D.x-D.gx-r.left)+'px,'+(D.y-D.gy-r.top)+'px) scale(1.06)';
+  const s0=D.slots[D.from],tx=D.x-lr.left-D.gx,ty=D.y-lr.top-D.gy,cx=tx+s0.w/2,cy=ty+s0.h/2;
+  let best=D.cur,bd=1e12,cd=1e12;
+  D.slots.forEach((s,i)=>{
+    const d=Math.hypot(cx-(s.x+s.w/2),cy-(s.y+s.h/2));
+    if(d<bd){bd=d;best=i}
+    if(i===D.cur)cd=d;
+  });
+  if(best!==D.cur&&bd<cd*0.8){D.cur=best;layoutOthers()}
+  card.style.transform='translate('+(tx-s0.x)+'px,'+(ty-s0.y)+'px) scale(1.06)';
   requestAnimationFrame(dragTick);
 }
 function endDrag(){
   if(!D)return;
-  const card=D.card;D=null;
-  card.style.transition='transform .16s ease';card.style.transform='';
-  setTimeout(()=>{card.classList.remove('drag');card.style.transition=''},170);
-  const by=Object.fromEntries(S.pages.map(q=>[q.id,q]));
-  S.pages=[...list.children].map(c=>by[c.dataset.id]);renumber();
+  const d=D;D=null;settle=true;
+  const card=d.card,b=d.slots[d.cur],a=d.slots[d.from];
+  card.style.transition='transform .18s ease';
+  card.style.transform='translate('+(b.x-a.x)+'px,'+(b.y-a.y)+'px)';
+  setTimeout(function(){
+    d.kids.forEach(function(c){c.style.transition='none';c.style.transform=''});
+    d.arr.forEach(function(c){list.appendChild(c)});
+    card.classList.remove('drag');
+    void list.offsetHeight;
+    d.kids.forEach(function(c){c.style.transition=''});
+    const by=Object.fromEntries(S.pages.map(q=>[q.id,q]));
+    S.pages=[...list.children].map(c=>by[c.dataset.id]);
+    renumber();settle=false;
+  },200);
 }
 
 function rebuild(){
   const has=S.pages.length>0;
+  document.body.classList.toggle('has',has);
   $('drop').style.display=has?'none':'flex';
   $('work').style.display=has?'block':'none';
   $('pagesBox').style.display=has?'block':'none';
@@ -402,8 +448,15 @@ function rebuild(){
     grip.onclick=e=>e.stopPropagation();
     grip.oncontextmenu=e=>e.preventDefault();
     grip.onpointerdown=e=>startDrag(e,card,grip);
-    grip.onpointermove=e=>{if(D&&D.card===card){D.x=e.clientX;D.y=e.clientY}};
-    grip.onpointerup=endDrag;grip.onpointercancel=endDrag;
+    const mv=e=>{if(D&&D.card===card){D.x=e.clientX;D.y=e.clientY}};
+    grip.onpointermove=mv;grip.onpointerup=endDrag;grip.onpointercancel=endDrag;
+    let pd=null;
+    card.onpointerdown=e=>{if(e.pointerType==='mouse'&&e.button===0&&!e.target.closest('.ck,.grip'))pd={x:e.clientX,y:e.clientY}};
+    card.onpointermove=e=>{
+      if(D){mv(e);return}
+      if(pd&&Math.hypot(e.clientX-pd.x,e.clientY-pd.y)>6){const o=pd;pd=null;startDrag(e,card,card,o.x,o.y)}
+    };
+    card.onpointerup=card.onpointercancel=()=>{pd=null;endDrag()};
     list.appendChild(card);
   });
   renumber();
@@ -460,21 +513,43 @@ function drawEd(){
 function openCrop(){
   const p=S.cur;if(!p)return;
   E.p=p;E.pts=(p.quad||detectQuad(p.img)||fullQ()).map(t=>t.slice());
-  const k=Math.min(1,900/Math.max(p.img.naturalWidth,p.img.naturalHeight));
+  const k=Math.min(1,(document.body.classList.contains('desk')?1400:900)/Math.max(p.img.naturalWidth,p.img.naturalHeight));
   ec.width=Math.round(p.img.naturalWidth*k);ec.height=Math.round(p.img.naturalHeight*k);
   $('cdlg').showModal();drawEd();
 }
+const lp=$('lp'),cl=t=>Math.min(1,Math.max(0,t));
 const epos=e=>{const r=ec.getBoundingClientRect();return[(e.clientX-r.left)/r.width,(e.clientY-r.top)/r.height,r]};
+function drawLoupe(){
+  if(E.drag<0){lp.style.display='none';return}
+  const im=E.p.img,iw=im.naturalWidth,ih=im.naturalHeight,L=lp.width,r=ec.getBoundingClientRect();
+  const pt=E.pts[E.drag],reg=lp.offsetWidth/((r.width/iw)*3.5);
+  const sx=pt[0]*iw-reg/2,sy=pt[1]*ih-reg/2,x=lp.getContext('2d');
+  x.fillStyle='#000';x.fillRect(0,0,L,L);
+  x.drawImage(im,sx,sy,reg,reg,0,0,L,L);
+  const M=q=>[(q[0]*iw-sx)/reg*L,(q[1]*ih-sy)/reg*L];
+  x.lineWidth=3;x.strokeStyle='#e74c3c';x.beginPath();
+  E.pts.forEach((q,n)=>{const m=M(q);n?x.lineTo(m[0],m[1]):x.moveTo(m[0],m[1])});
+  x.closePath();x.stroke();
+  x.strokeStyle='#fff';x.lineWidth=2;x.beginPath();
+  x.moveTo(L/2-16,L/2);x.lineTo(L/2+16,L/2);x.moveTo(L/2,L/2-16);x.lineTo(L/2,L/2+16);x.stroke();
+  const left=pt[0]<0.5&&pt[1]<0.4;
+  lp.style.left=left?'auto':'8px';lp.style.right=left?'8px':'auto';lp.style.display='block';
+}
 ec.onpointerdown=e=>{
   const [u,v,r]=epos(e);let bi=-1,bd=1e9;
   E.pts.forEach((q,i)=>{const dd=Math.hypot((q[0]-u)*r.width,(q[1]-v)*r.height);if(dd<bd){bd=dd;bi=i}});
-  if(bd<44){E.drag=bi;ec.setPointerCapture(e.pointerId)}
+  if(bd<64){
+    E.drag=bi;E.sx=e.clientX;E.sy=e.clientY;E.p0=E.pts[bi].slice();
+    ec.setPointerCapture(e.pointerId);drawLoupe();
+  }
 };
 ec.onpointermove=e=>{
-  if(E.drag<0)return;const [u,v]=epos(e);
-  E.pts[E.drag]=[Math.min(1,Math.max(0,u)),Math.min(1,Math.max(0,v))];drawEd();
+  if(E.drag<0)return;
+  const r=ec.getBoundingClientRect();
+  E.pts[E.drag]=[cl(E.p0[0]+(e.clientX-E.sx)/r.width),cl(E.p0[1]+(e.clientY-E.sy)/r.height)];
+  drawEd();drawLoupe();
 };
-ec.onpointerup=ec.onpointercancel=()=>{E.drag=-1};
+ec.onpointerup=ec.onpointercancel=()=>{E.drag=-1;drawLoupe()};
 $('cropEdit').onclick=openCrop;
 $('cAuto').onclick=()=>{
   const q=detectQuad(E.p.img);
@@ -517,6 +592,10 @@ function makePdf(name){
   });
   pdf.save(name+'.pdf');
 }
+const mq=window.matchMedia('(min-width:900px) and (pointer:fine)');
+const plat=()=>document.body.classList.toggle('desk',mq.matches);
+if(mq.addEventListener)mq.addEventListener('change',plat);else mq.addListener(plat);
+plat();
 sync();
 </script>
 </body>
